@@ -1,0 +1,13 @@
+{
+  "name": "SNAP Checker",
+  "shortName": "SNAPCheck",
+  "subtitle": "Cek reward SNAP kamu",
+  "description": "Cek reward SNAP token Farcaster kamu - lihat jumlah yang sudah diklaim dan yang masih dalam vesting. Search siapapun berdasarkan username Farcaster.",
+  "shortDescription": "Cek reward dan vesting SNAP token Farcaster",
+  "primaryCategory": "utility",
+  "tags": ["snap", "farcaster", "rewards", "token", "vesting"],
+  "splashBackgroundColor": "#0a0a12",
+  "tagline": "Cek reward SNAP-mu sekarang!",
+  "requiredChains": ["eip155:8453", "eip155:1"],
+  "shareButtonTitle": "Cek SNAP Saya"
+}
