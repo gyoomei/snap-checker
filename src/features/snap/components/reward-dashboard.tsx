@@ -172,7 +172,7 @@ export function RewardDashboard({ data }: Props) {
       </ShareButton>
 
       <p className="text-white/20 text-xs text-center pb-2">
-        Data diperbarui: {new Date(data.lastUpdated).toLocaleDateString("id-ID")} · Mock Data
+        Data diperbarui: {new Date(data.lastUpdated).toLocaleDateString("id-ID")}
       </p>
     </div>
   );

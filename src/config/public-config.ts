@@ -114,9 +114,12 @@ const canonicalDomain =
   process.env.NEXT_PUBLIC_VERCEL_PRODUCTION_URL ??
   process.env.NEXT_PUBLIC_LOCAL_URL ??
   process.env.NEXT_PUBLIC_BASE_URL ??
-  "";
+  process.env.NEXT_PUBLIC_CANONICAL_DOMAIN ??
+  "gyoomei.github.io/snap-checker";
 
-const homeUrl = `https://${canonicalDomain}`;
+const homeUrl = canonicalDomain.startsWith("http")
+  ? canonicalDomain
+  : `https://${canonicalDomain}`;
 
 /**
  * Resolves an image URL:

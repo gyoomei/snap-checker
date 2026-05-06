@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useFarcasterUser } from "@/neynar-farcaster-sdk/mini";
 import { UserSearch } from "@/features/snap/components/user-search";
 import { RewardDashboard } from "@/features/snap/components/reward-dashboard";
-import { getMockReward } from "@/features/snap/mock-data";
+import { getSnapReward } from "@/features/snap/api";
 import type { SnapRewardData, SearchState } from "@/features/snap/types";
 
 export function MiniApp() {
@@ -18,15 +18,17 @@ export function MiniApp() {
     setErrorMsg(null);
     setRewardData(null);
 
-    // Simulate API call delay
-    await new Promise((r) => setTimeout(r, 800));
-
-    const data = getMockReward(username);
-    if (data) {
-      setRewardData(data);
-      setSearchState("success");
-    } else {
-      setErrorMsg("User tidak ditemukan.");
+    try {
+      const data = await getSnapReward(username);
+      if (data) {
+        setRewardData(data);
+        setSearchState("success");
+      } else {
+        setErrorMsg("User tidak ditemukan atau tidak memiliki $SNAP.");
+        setSearchState("error");
+      }
+    } catch {
+      setErrorMsg("Gagal mengambil data. Coba lagi.");
       setSearchState("error");
     }
   }

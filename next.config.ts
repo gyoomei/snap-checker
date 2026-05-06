@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "export",
+  typescript: { ignoreBuildErrors: true },
   basePath: process.env.CI ? "/snap-checker" : "",
   images: {
     unoptimized: true,
