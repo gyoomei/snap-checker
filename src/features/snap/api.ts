@@ -2,143 +2,128 @@ import type { SnapRewardData } from "./types";
 
 // SNAP Token contract on Ethereum Mainnet
 const SNAP_CONTRACT = "0x49B5a631F54927c0007232844f06FE18cbf69786" as const;
+const SNAP_DECIMALS = 6;
 
-// Ethereum RPC (public, no API key needed)
+// Ethereum public RPC
 const ETH_RPC = "https://ethereum-rpc.publicnode.com";
 
-// Build balanceOf call data
+// Contract deployment: Jan 2025 (approximate)
+const VESTING_START = new Date("2025-01-01T00:00:00Z");
+const CLIFF_MONTHS = 12; // 12-month cliff
+const VESTING_TOTAL_MONTHS = 24; // 24-month total vesting
+
+// ─── On-chain fetch ─────────────────────────────────────────────────────────
+
 function balanceOfData(owner: string): string {
   const methodId = "0x70a08231"; // balanceOf(address)
   const padded = owner.toLowerCase().replace("0x", "").padStart(64, "0");
   return methodId + padded;
 }
 
-// Get SNAP balance for an ETH address
 export async function getSnapBalance(ethAddress: string): Promise<number> {
   try {
-    const body = JSON.stringify({
-      jsonrpc: "2.0",
-      method: "eth_call",
-      params: [
-        {
-          to: SNAP_CONTRACT,
-          data: balanceOfData(ethAddress),
-        },
-        "latest",
-      ],
-      id: 1,
-    });
-
     const res = await fetch(ETH_RPC, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "eth_call",
+        params: [{ to: SNAP_CONTRACT, data: balanceOfData(ethAddress) }, "latest"],
+        id: 1,
+      }),
     });
-
     if (!res.ok) return 0;
-
     const json = await res.json();
     const hex = json?.result;
-    if (!hex || hex === "0x") return 0;
-
-    const balance = BigInt(hex);
-    return Number(balance) / 1e6; // SNAP has 6 decimals
+    if (!hex || hex === "0x" || hex === "0x0") return 0;
+    return Number(BigInt(hex)) / 10 ** SNAP_DECIMALS;
   } catch {
     return 0;
   }
 }
 
-// Fetch real user data from Warpcast
-async function fetchUserProfile(username: string): Promise<{
-  username: string;
-  displayName: string;
-  pfpUrl: string;
-  fid: number;
-} | null> {
-  try {
-    const res = await fetch(
-      `https://api.warpcast.com/v2/user-by-username?username=${encodeURIComponent(username)}`
-    );
-    if (!res.ok) return null;
-    const json = await res.json();
-    const user = json?.result?.user;
-    if (!user) return null;
+// ─── Vesting calculation ───────────────────────────────────────────────────
 
-    return {
-      username: user.username,
-      displayName: user.displayName || user.username,
-      pfpUrl: user.pfp?.url || `https://api.dicebear.com/9.x/identicon/svg?seed=${user.username}`,
-      fid: user.fid,
-    };
-  } catch {
-    return null;
-  }
-}
-
-// Build vesting schedule (estimated based on token distribution)
 function buildVestingSchedule(totalSnap: number): {
   schedule: SnapRewardData["vestingSchedule"];
   vestingSnap: number;
   vestingPercent: number;
+  cliffDate: Date;
+  endDate: Date;
 } {
   const now = new Date();
-  const year = now.getFullYear();
-  const quartersSinceStart = Math.floor(
-    (now.getTime() - new Date(`${year}-01-01`).getTime()) / (90 * 24 * 60 * 60 * 1000)
+
+  // Cliff: 12 months after start
+  const cliffDate = new Date(VESTING_START);
+  cliffDate.setMonth(cliffDate.getMonth() + CLIFF_MONTHS);
+
+  // End: 24 months after start
+  const endDate = new Date(VESTING_START);
+  endDate.setMonth(endDate.getMonth() + VESTING_TOTAL_MONTHS);
+
+  // Before cliff: 0% unlocked
+  // After cliff: linear unlock over remaining months
+  const monthsSinceCliff = Math.max(
+    0,
+    (now.getTime() - cliffDate.getTime()) / (30.44 * 24 * 60 * 60 * 1000)
   );
-  const totalQuarters = 16;
-  const unlockedQuarters = Math.min(Math.max(quartersSinceStart, 0), totalQuarters);
-  const unlockPercent = (unlockedQuarters / totalQuarters) * 100;
+  const totalVestingMonths = VESTING_TOTAL_MONTHS - CLIFF_MONTHS;
+  const unlockPercent = Math.min(
+    100,
+    (monthsSinceCliff / totalVestingMonths) * 100
+  );
 
-  const vestingSnap = totalSnap * (1 - unlockPercent / 100);
+  const vestedSnap = totalSnap * (unlockPercent / 100);
+  const lockedSnap = totalSnap - vestedSnap;
+  const vestingPercent = Math.round((lockedSnap / totalSnap) * 100) || 0;
 
-  const schedule = [
-    { label: "Q1 2025", date: `${year}-03-31`, amount: Math.floor(totalSnap * 0.0625), unlocked: quartersSinceStart >= 0 },
-    { label: "Q2 2025", date: `${year}-06-30`, amount: Math.floor(totalSnap * 0.0625), unlocked: quartersSinceStart >= 1 },
-    { label: "Q3 2025", date: `${year}-09-30`, amount: Math.floor(totalSnap * 0.0625), unlocked: quartersSinceStart >= 2 },
-    { label: "Q4 2025", date: `${year}-12-31`, amount: Math.floor(totalSnap * 0.0625), unlocked: quartersSinceStart >= 3 },
-  ];
+  // Build quarterly milestones from cliff to end
+  const milestones: SnapRewardData["vestingSchedule"] = [];
+  const current = new Date(cliffDate);
+  const quarterlyAmount = Math.floor(totalSnap / (totalVestingMonths / 3));
+
+  for (let i = 0; i < 4; i++) {
+    const label = `Q${i + 1} ${cliffDate.getFullYear()}`;
+    const date = new Date(current);
+    const unlocked = now >= date;
+    milestones.push({ label, date: date.toISOString().split("T")[0], amount: quarterlyAmount, unlocked });
+    current.setMonth(current.getMonth() + 3);
+  }
+
+  // If we passed cliff, show current progress milestone
+  if (unlockPercent > 0 && unlockPercent < 100) {
+    milestones[0] = {
+      ...milestones[0],
+      amount: Math.floor(totalSnap * (unlockPercent / 100)),
+      unlocked: true,
+    };
+  }
 
   return {
-    schedule,
-    vestingSnap: Math.floor(vestingSnap),
-    vestingPercent: Math.round((1 - unlockPercent / 100) * 100),
+    schedule: milestones.filter((m) => m.amount > 0),
+    vestingSnap: Math.floor(lockedSnap),
+    vestingPercent,
+    cliffDate,
+    endDate,
   };
 }
 
-// Get SNAP reward untuk user tertentu
-export async function getSnapReward(username: string): Promise<SnapRewardData | null> {
-  const profile = await fetchUserProfile(username);
-  if (!profile) return null;
+// ─── Main API ───────────────────────────────────────────────────────────────
 
-  return {
-    ...profile,
-    totalSnap: 0,
-    claimedSnap: 0,
-    vestingSnap: 0,
-    vestingPercent: 0,
-    lastUpdated: new Date().toISOString(),
-    vestingSchedule: [],
-  };
-}
-
-// Get SNAP reward untuk wallet address
 export async function getSnapRewardForAddress(
-  ethAddress: string,
-  userProfile?: { username: string; displayName: string; pfpUrl: string; fid: number }
+  ethAddress: string
 ): Promise<SnapRewardData | null> {
   const totalSnap = await getSnapBalance(ethAddress);
-  
-  const profile = userProfile || {
-    username: "unknown",
-    displayName: "Unknown User",
-    pfpUrl: `https://api.dicebear.com/9.x/identicon/svg?seed=${ethAddress}`,
-    fid: 0,
-  };
+
+  // Wallet identity from address
+  const shortAddr = `${ethAddress.slice(0, 6)}...${ethAddress.slice(-4)}`;
 
   if (totalSnap <= 0) {
     return {
-      ...profile,
+      username: shortAddr,
+      displayName: shortAddr,
+      pfpUrl: `https://api.dicebear.com/9.x/identicon/svg?seed=${ethAddress}`,
+      fid: 0,
       totalSnap: 0,
       claimedSnap: 0,
       vestingSnap: 0,
@@ -152,9 +137,12 @@ export async function getSnapRewardForAddress(
   const claimedSnap = totalSnap - vestingSnap;
 
   return {
-    ...profile,
+    username: shortAddr,
+    displayName: shortAddr,
+    pfpUrl: `https://api.dicebear.com/9.x/identicon/svg?seed=${ethAddress}`,
+    fid: 0,
     totalSnap,
-    claimedSnap,
+    claimedSnap: Math.floor(claimedSnap),
     vestingSnap,
     vestingPercent,
     lastUpdated: new Date().toISOString(),
